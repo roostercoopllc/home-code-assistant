@@ -6,8 +6,8 @@ Run Ollama + Qwen2.5-Coder 7B + Open WebUI on a Raspberry Pi (ideally Pi 5 8GB)
 → Provide a beautiful ChatGPT-like web interface on your local network
 
 **Last tested / written for**  
-- Raspberry Pi OS (64-bit Bookworm or later)  
-- Pi 5 with 8 GB RAM recommended  
+- [Raspberry Pi OS (64-bit Bookworm or later)](https://downloads.raspberrypi.com/raspios_arm64/images/raspios_arm64-2025-12-04/2025-12-04-raspios-trixie-arm64.img.xz)  
+- [Pi 5 with 8 GB RAM recommended](https://vilros.com/products/raspberry-pi-5?variant=40065551302750)
 - Ollama v0.3.x / Open WebUI latest (as of 2025)
 
 ## Quick Start – How to Run
