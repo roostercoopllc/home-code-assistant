@@ -56,7 +56,7 @@ sudo mkdir -p /etc/systemd/system/ollama.service.d
 
 cat << EOF | sudo tee /etc/systemd/system/ollama.service.d/override.conf >/dev/null
 [Service]
-Environment="OLLAMA_HOST=${HOST}:${PORT}"
+Environment="OLLAMA_HOST=${HOST}:${OLLAMA_PORT}"
 Environment="OLLAMA_ORIGINS=*"
 EOF
 
