@@ -54,15 +54,24 @@ info "Configuring Ollama to listen on all interfaces..."
 
 sudo mkdir -p /etc/systemd/system/ollama.service.d
 
-cat << EOF | sudo tee /etc/systemd/system/ollama.service.d/override.conf >/dev/null
+cat << 'END_CONF' | sudo tee /etc/systemd/system/ollama.service.d/override.conf >/dev/null
 [Service]
-Environment="OLLAMA_HOST=${HOST}:${OLLAMA_PORT}"
+Environment="OLLAMA_HOST=0.0.0.0:11434"
 Environment="OLLAMA_ORIGINS=*"
-EOF
+# Optional - limit if RAM is tight on Pi
+# Environment="OLLAMA_MAX_LOADED_MODELS=1"
+END_CONF
 
 sudo systemctl daemon-reload
 sudo systemctl restart ollama
 sleep 5
+
+# Quick test
+if curl -s http://localhost:11434 >/dev/null; then
+    info "Ollama API is now listening on port 11434 (network access enabled)."
+else
+    error "Ollama failed to start or is not listening. Check: journalctl -u ollama -n 50"
+fi
 
 # ────────────────────────────────────────────────────────────────────────────────
 #  3. Pull best coding model
