@@ -50,18 +50,19 @@ curl -fsSL https://ollama.com/install.sh | sh
 sleep 4
 
 # Configure Ollama for network access
-info "Configuring Ollama to listen on ${HOST}:${OLLAMA_PORT}..."
-sudo systemctl edit ollama.service << EOF
+info "Configuring Ollama to listen on all interfaces..."
+
+sudo mkdir -p /etc/systemd/system/ollama.service.d
+
+cat << EOF | sudo tee /etc/systemd/system/ollama.service.d/override.conf >/dev/null
 [Service]
-Environment="OLLAMA_HOST=${HOST}:${OLLAMA_PORT}"
+Environment="OLLAMA_HOST=${HOST}:${PORT}"
 Environment="OLLAMA_ORIGINS=*"
-# Optional: limit loaded models if RAM is tight
-# Environment="OLLAMA_MAX_LOADED_MODELS=1"
 EOF
 
 sudo systemctl daemon-reload
 sudo systemctl restart ollama
-sleep 6
+sleep 5
 
 # ────────────────────────────────────────────────────────────────────────────────
 #  3. Pull best coding model
