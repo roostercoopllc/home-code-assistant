@@ -96,12 +96,17 @@ curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker "$USER"   # log out & back in after script finishes
 
 info "Launching Open WebUI (ChatGPT-like interface)..."
-sudo docker run -d \
-  --name open-webui \
-  -p ${WEBUI_PORT}:8080 \
-  -v ollama:/root/.ollama \
+#sudo docker run -d \
+#  --name open-webui \
+#  -p ${WEBUI_PORT}:8080 \
+#  -v ollama:/root/.ollama \
+#  -v open-webui:/app/backend/data \
+#  --restart always \
+#  ghcr.io/open-webui/open-webui:ollama
+
+docker run -d --network=host \
   -v open-webui:/app/backend/data \
-  --restart always \
+  --name open-webui --restart always \
   ghcr.io/open-webui/open-webui:ollama
 
 sleep 8
