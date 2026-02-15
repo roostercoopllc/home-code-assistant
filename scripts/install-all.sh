@@ -13,17 +13,21 @@ set -euo pipefail
 
 TARGET_ARCH=""
 GPU_FLAG=""   # "", "force", or "disable"
+OLLAMA_PORT=""
+WEBUI_PORT=""
 
 usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
 Options:
-  --arm         Target ARM64 architecture (Raspberry Pi / aarch64)
-  --x86         Target x86_64 architecture (desktop / server)
-  --gpu         Force-enable NVIDIA GPU passthrough for Docker containers
-  --no-gpu      Disable GPU passthrough even if a GPU is detected
-  -h, --help    Show this help message
+  --arm                Target ARM64 architecture (Raspberry Pi / aarch64)
+  --x86                Target x86_64 architecture (desktop / server)
+  --gpu                Force-enable NVIDIA GPU passthrough for Docker containers
+  --no-gpu             Disable GPU passthrough even if a GPU is detected
+  --ollama-port PORT   Set Ollama API port (default: 11434)
+  --webui-port PORT    Set Open WebUI port (default: 8080)
+  -h, --help           Show this help message
 
 If no architecture flag is given, the script auto-detects from the host.
 If neither --gpu nor --no-gpu is given, the script auto-detects NVIDIA GPUs.
@@ -33,11 +37,13 @@ EOF
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --arm)    TARGET_ARCH="arm64"; shift ;;
-        --x86)    TARGET_ARCH="x86_64"; shift ;;
-        --gpu)    GPU_FLAG="force"; shift ;;
-        --no-gpu) GPU_FLAG="disable"; shift ;;
-        -h|--help) usage ;;
+        --arm)          TARGET_ARCH="arm64"; shift ;;
+        --x86)          TARGET_ARCH="x86_64"; shift ;;
+        --gpu)          GPU_FLAG="force"; shift ;;
+        --no-gpu)       GPU_FLAG="disable"; shift ;;
+        --ollama-port)  OLLAMA_PORT="$2"; shift 2 ;;
+        --webui-port)   WEBUI_PORT="$2"; shift 2 ;;
+        -h|--help)      usage ;;
         *) echo "Unknown option: $1"; usage ;;
     esac
 done
@@ -53,8 +59,8 @@ MODELS=(
     "qwen2.5:7b"              # General assistant — chat, summarisation & reasoning
 )
 
-OLLAMA_PORT="11434"
-WEBUI_PORT="8080"                  # Open WebUI web interface
+OLLAMA_PORT="${OLLAMA_PORT:-11434}"
+WEBUI_PORT="${WEBUI_PORT:-8080}"
 HOST="0.0.0.0"                     # Listen on all interfaces (LAN access)
 
 # Change these if you want stricter firewall rules
@@ -133,9 +139,9 @@ info "Configuring Ollama to listen on all interfaces..."
 
 sudo mkdir -p /etc/systemd/system/ollama.service.d
 
-cat << 'END_CONF' | sudo tee /etc/systemd/system/ollama.service.d/override.conf >/dev/null
+cat << END_CONF | sudo tee /etc/systemd/system/ollama.service.d/override.conf >/dev/null
 [Service]
-Environment="OLLAMA_HOST=0.0.0.0:11434"
+Environment="OLLAMA_HOST=0.0.0.0:${OLLAMA_PORT}"
 Environment="OLLAMA_ORIGINS=*"
 # Optional - limit if RAM is tight on Pi
 # Environment="OLLAMA_MAX_LOADED_MODELS=1"
@@ -146,10 +152,10 @@ sudo systemctl restart ollama
 sleep 5
 
 # Quick test
-if curl -s http://localhost:11434 >/dev/null; then
-    info "Ollama API is now listening on port 11434 (network access enabled)."
+if curl -s "http://localhost:${OLLAMA_PORT}" >/dev/null; then
+    info "Ollama API is now listening on port ${OLLAMA_PORT} (network access enabled)."
 else
-    error "Ollama failed to start or is not listening. Check: journalctl -u ollama -n 50"
+    error "Ollama failed to start or is not listening on port ${OLLAMA_PORT}. Check: journalctl -u ollama -n 50"
 fi
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -197,9 +203,11 @@ fi
 
 info "Launching Open WebUI (ChatGPT-like interface)..."
 
-DOCKER_ARGS=(run -d --network=host
+DOCKER_ARGS=(run -d
+  -p "${WEBUI_PORT}:8080"
   -v open-webui:/app/backend/data
-  -e OLLAMA_BASE_URL=http://127.0.0.1:${OLLAMA_PORT}
+  -e OLLAMA_BASE_URL="http://host.docker.internal:${OLLAMA_PORT}"
+  --add-host=host.docker.internal:host-gateway
   --name open-webui --restart always)
 
 if [[ "$USE_GPU" == true ]]; then
