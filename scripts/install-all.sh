@@ -1,16 +1,58 @@
 #!/usr/bin/env bash
-# install-ollama-qwen-coder-openwebui-pi.sh
-# Sets up Ollama + qwen2.5-coder:7b + Open WebUI on Raspberry Pi
+# install-all.sh
+# Sets up Ollama + multiple models + Open WebUI
+# Supports both ARM64 (Raspberry Pi) and x86_64 (desktop/server)
 # Enables local network access for VS Code / browser
 # Basic firewall hardening (ufw)
 
 set -euo pipefail
 
 # ────────────────────────────────────────────────────────────────────────────────
+#  Usage / flag parsing
+# ────────────────────────────────────────────────────────────────────────────────
+
+TARGET_ARCH=""
+GPU_FLAG=""   # "", "force", or "disable"
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Options:
+  --arm         Target ARM64 architecture (Raspberry Pi / aarch64)
+  --x86         Target x86_64 architecture (desktop / server)
+  --gpu         Force-enable NVIDIA GPU passthrough for Docker containers
+  --no-gpu      Disable GPU passthrough even if a GPU is detected
+  -h, --help    Show this help message
+
+If no architecture flag is given, the script auto-detects from the host.
+If neither --gpu nor --no-gpu is given, the script auto-detects NVIDIA GPUs.
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --arm)    TARGET_ARCH="arm64"; shift ;;
+        --x86)    TARGET_ARCH="x86_64"; shift ;;
+        --gpu)    GPU_FLAG="force"; shift ;;
+        --no-gpu) GPU_FLAG="disable"; shift ;;
+        -h|--help) usage ;;
+        *) echo "Unknown option: $1"; usage ;;
+    esac
+done
+
+# ────────────────────────────────────────────────────────────────────────────────
 #  Configuration
 # ────────────────────────────────────────────────────────────────────────────────
 
-MODEL="qwen2.5-coder:7b"           # Best 7B coding model for autocomplete & generation
+# Models to pull — add or remove entries to taste
+MODELS=(
+    "qwen2.5-coder:7b"        # Code assistant — autocomplete, generation & refactoring
+    "llava:7b"                 # Visual assistant — image understanding & description
+    "qwen2.5:7b"              # General assistant — chat, summarisation & reasoning
+)
+
 OLLAMA_PORT="11434"
 WEBUI_PORT="8080"                  # Open WebUI web interface
 HOST="0.0.0.0"                     # Listen on all interfaces (LAN access)
@@ -38,7 +80,44 @@ sudo apt update -yqq && sudo apt upgrade -yqq
 sudo apt install -y curl git ufw
 
 ARCH=$(uname -m)
-[[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]] || error "Script designed for 64-bit ARM (aarch64). Found: $ARCH"
+
+# Auto-detect if no flag was given
+if [[ -z "$TARGET_ARCH" ]]; then
+    case "$ARCH" in
+        aarch64|arm64) TARGET_ARCH="arm64" ;;
+        x86_64)        TARGET_ARCH="x86_64" ;;
+        *) error "Unsupported architecture: $ARCH. Use --arm or --x86 to override." ;;
+    esac
+    info "Auto-detected architecture: ${TARGET_ARCH}"
+else
+    info "Architecture override: ${TARGET_ARCH} (host is ${ARCH})"
+fi
+
+# ── GPU detection ──
+USE_GPU=false
+
+if [[ "$GPU_FLAG" == "force" ]]; then
+    USE_GPU=true
+    info "GPU passthrough force-enabled via --gpu flag."
+elif [[ "$GPU_FLAG" == "disable" ]]; then
+    USE_GPU=false
+    info "GPU passthrough disabled via --no-gpu flag."
+else
+    # Auto-detect: look for NVIDIA GPU + nvidia-smi or lspci
+    if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
+        USE_GPU=true
+        info "Auto-detected NVIDIA GPU (nvidia-smi)."
+    elif lspci 2>/dev/null | grep -iq nvidia; then
+        USE_GPU=true
+        info "Auto-detected NVIDIA GPU (lspci). Ensure nvidia-container-toolkit is installed."
+    else
+        info "No NVIDIA GPU detected — running in CPU-only mode."
+    fi
+fi
+
+if [[ "$USE_GPU" == true && "$TARGET_ARCH" == "arm64" ]]; then
+    info "Warning: GPU passthrough is not common on ARM64. Proceeding anyway."
+fi
 
 # ────────────────────────────────────────────────────────────────────────────────
 #  2. Install Ollama
@@ -74,18 +153,20 @@ else
 fi
 
 # ────────────────────────────────────────────────────────────────────────────────
-#  3. Pull best coding model
+#  3. Pull models
 # ────────────────────────────────────────────────────────────────────────────────
 
-info "Pulling model: ${MODEL} (this may take 5–15 minutes)..."
-ollama pull "${MODEL}"
+for model in "${MODELS[@]}"; do
+    info "Pulling model: ${model} ..."
+    ollama pull "${model}"
 
-info "Verifying model..."
-ollama list | grep -q "${MODEL%%:*}" || error "Model pull failed."
+    info "Verifying model: ${model}"
+    ollama list | grep -q "${model%%:*}" || error "Model pull failed for ${model}."
+done
 
-# Optional: warm up the model (loads it into RAM)
-info "Pre-loading model (may take a few minutes)..."
-ollama run "${MODEL}" "Model loaded — ready for code completion." >/dev/null 2>&1 &
+# Warm up the first model (loads it into RAM)
+info "Pre-loading ${MODELS[0]} ..."
+ollama run "${MODELS[0]}" "Model loaded — ready." >/dev/null 2>&1 &
 
 # ────────────────────────────────────────────────────────────────────────────────
 #  4. Install Docker → Open WebUI
@@ -96,18 +177,20 @@ curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker "$USER"   # log out & back in after script finishes
 
 info "Launching Open WebUI (ChatGPT-like interface)..."
-#sudo docker run -d \
-#  --name open-webui \
-#  -p ${WEBUI_PORT}:8080 \
-#  -v ollama:/root/.ollama \
-#  -v open-webui:/app/backend/data \
-#  --restart always \
-#  ghcr.io/open-webui/open-webui:ollama
 
-docker run -d --network=host \
-  -v open-webui:/app/backend/data \
-  --name open-webui --restart always \
-  ghcr.io/open-webui/open-webui:ollama
+DOCKER_ARGS=(run -d --network=host
+  -v open-webui:/app/backend/data
+  -e OLLAMA_BASE_URL=http://127.0.0.1:${OLLAMA_PORT}
+  --name open-webui --restart always)
+
+if [[ "$USE_GPU" == true ]]; then
+    info "Enabling NVIDIA GPU passthrough for Open WebUI container..."
+    DOCKER_ARGS+=(--gpus all)
+fi
+
+DOCKER_ARGS+=(ghcr.io/open-webui/open-webui:main)
+
+docker "${DOCKER_ARGS[@]}"
 
 sleep 8
 
@@ -128,22 +211,31 @@ sudo ufw --force enable    # warning: this enables the firewall!
 #  6. Summary & next steps
 # ────────────────────────────────────────────────────────────────────────────────
 
-PI_IP=$(hostname -I | awk '{print $1}')
+HOST_IP=$(hostname -I | awk '{print $1}')
 
 info "──────────────────────────────────────────────────────────────"
 info "Setup complete! 🎉"
 info ""
-info "• Ollama API     → http://${PI_IP}:${OLLAMA_PORT}"
-info "• Open WebUI     → http://${PI_IP}:${WEBUI_PORT}     (open in browser)"
-info "• Model loaded   → ${MODEL} (great for coding!)"
+info "• Architecture   → ${TARGET_ARCH}"
+info "• GPU enabled    → ${USE_GPU}"
+info "• Ollama API     → http://${HOST_IP}:${OLLAMA_PORT}"
+info "• Open WebUI     → http://${HOST_IP}:${WEBUI_PORT}     (open in browser)"
+info ""
+info "Models installed:"
+for model in "${MODELS[@]}"; do
+    info "  • ${model}"
+done
+info ""
+info "Open WebUI will auto-detect all Ollama models."
+info "Switch between them from the model selector in the UI."
 info ""
 info "VS Code / Continue extension config:"
-info "  apiBase: http://${PI_IP}:${OLLAMA_PORT}"
-info "  model:   ${MODEL}"
+info "  apiBase: http://${HOST_IP}:${OLLAMA_PORT}"
+info "  model:   ${MODELS[0]}"
 info ""
 info "Test commands (from another machine on LAN):"
-info "  curl http://${PI_IP}:${OLLAMA_PORT}                  # should say 'Ollama is running'"
-info "  curl http://${PI_IP}:${OLLAMA_PORT}/api/tags         # list models"
+info "  curl http://${HOST_IP}:${OLLAMA_PORT}                  # should say 'Ollama is running'"
+info "  curl http://${HOST_IP}:${OLLAMA_PORT}/api/tags         # list models"
 info ""
 info "Security notes:"
 info "  • Only LAN access allowed (ufw rules)"
