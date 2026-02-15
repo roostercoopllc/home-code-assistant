@@ -176,6 +176,25 @@ info "Installing Docker (required for Open WebUI)..."
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker "$USER"   # log out & back in after script finishes
 
+# Install NVIDIA Container Toolkit if GPU is enabled
+if [[ "$USE_GPU" == true ]]; then
+    if ! command -v nvidia-container-runtime >/dev/null 2>&1; then
+        info "Installing NVIDIA Container Toolkit (required for --gpus flag)..."
+        curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+            | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+        curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+            | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+            | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list > /dev/null
+        sudo apt update -yqq
+        sudo apt install -y nvidia-container-toolkit
+        sudo nvidia-ctk runtime configure --runtime=docker
+        sudo systemctl restart docker
+        info "NVIDIA Container Toolkit installed and Docker runtime configured."
+    else
+        info "NVIDIA Container Toolkit already installed."
+    fi
+fi
+
 info "Launching Open WebUI (ChatGPT-like interface)..."
 
 DOCKER_ARGS=(run -d --network=host
